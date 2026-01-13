@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,10 +16,11 @@ import (
 )
 
 type Source struct {
-	Name    string `yaml:"name"`
-	RepoURL string `yaml:"repo_url"`
-	DataURL string `yaml:"data_url"`
-	Type    string `yaml:"type"`
+	Name      string `yaml:"name"`
+	RepoURL   string `yaml:"repo_url"`
+	DataURI   string `yaml:"data_uri"`
+	Type      string `yaml:"type"`
+	Whitelist bool   `yaml:"whitelist"`
 }
 
 type Config struct {
@@ -41,61 +43,86 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	domains := make(map[string]struct{})
-	var mu sync.Mutex
+	blacklistDomains := make(map[string]struct{})
+	whitelistDomains := make(map[string]struct{})
+	var muB sync.Mutex
+	var muW sync.Mutex
 
-	fmt.Println("Downloading domain names from", len(config.Input), "sources...")
-
+	fmt.Println("Processing sources from config...")
 	for _, source := range config.Input {
 		wg.Add(1)
 		go func(src Source) {
 			defer wg.Done()
 
-			resp, err := http.Get(src.DataURL)
-			if err != nil {
-				fmt.Printf("Failed to download %s: %v\n", src.Name, err)
+			var reader io.ReadCloser
+			if src.Type == "repo" {
+				resp, err := http.Get(src.DataURI)
+				if err != nil {
+					fmt.Printf("Failed to download %s: %v\n", src.Name, err)
+					return
+				}
+				reader = resp.Body
+			} else if src.Type == "local" {
+				file, err := os.Open(src.DataURI)
+				if err != nil {
+					fmt.Printf("Failed to open local file %s: %v\n", src.Name, err)
+					return
+				}
+				reader = file
+			} else {
+				fmt.Printf("Unknown type for source %s\n", src.Name)
 				return
 			}
-			defer resp.Body.Close()
+			defer reader.Close()
 
-			scanner := bufio.NewScanner(resp.Body)
+			scanner := bufio.NewScanner(reader)
 			localCount := 0
-
 			for scanner.Scan() {
-				line := strings.TrimSpace(scanner.Text())
-
-				if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
-					continue
-				}
-
-				domain := strings.ToLower(line)
-
-				if domainRegex.MatchString(domain) {
-					mu.Lock()
-					domains[domain] = struct{}{}
-					mu.Unlock()
-					localCount++
+				if src.Whitelist {
+					if processLine(scanner.Text(), whitelistDomains, &muW) {
+						localCount++
+					}
+				} else {
+					if processLine(scanner.Text(), blacklistDomains, &muB) {
+						localCount++
+					}
 				}
 			}
-			fmt.Printf("Downloaded and corrected %d domain names from %s.\n", localCount, src.Name)
+			fmt.Printf("Successfully processed %d domain names from %s.\n", localCount, src.Name)
 		}(source)
 	}
-
 	wg.Wait()
 
-	outputPath := "output/blacklist.txt"
-	saveToFile(domains, outputPath)
+	saveToFile(blacklistDomains, "output/blacklist.txt")
+
+	graylistDomains := make(map[string]struct{})
+	for domain := range blacklistDomains {
+		if _, found := whitelistDomains[domain]; !found {
+			graylistDomains[domain] = struct{}{}
+		}
+	}
+	saveToFile(graylistDomains, "output/graylist.txt")
+}
+
+func processLine(line string, storage map[string]struct{}, mu *sync.Mutex) bool {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+		return false
+	}
+	domain := strings.ToLower(line)
+	if domainRegex.MatchString(domain) {
+		mu.Lock()
+		storage[domain] = struct{}{}
+		mu.Unlock()
+		return true
+	}
+	return false
 }
 
 func saveToFile(domains map[string]struct{}, filename string) {
 	dir := filepath.Dir(filename)
+	_ = os.MkdirAll(dir, 0755)
 
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		fmt.Printf("Failed to create directories: %v\n", err)
-		return
-	}
-
-	fmt.Println("Sorting...")
 	sortedDomains := make([]string, 0, len(domains))
 	for d := range domains {
 		sortedDomains = append(sortedDomains, d)
@@ -104,7 +131,7 @@ func saveToFile(domains map[string]struct{}, filename string) {
 
 	file, err := os.Create(filename)
 	if err != nil {
-		fmt.Printf("Failed to save to file: %v\n", err)
+		fmt.Printf("Failed to save to file %s: %v\n", filename, err)
 		return
 	}
 	defer file.Close()
