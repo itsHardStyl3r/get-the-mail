@@ -1,0 +1,54 @@
+name: Update Domain Lists
+
+on:
+  schedule:
+    - cron: '0 18 */3 * *'
+  workflow_dispatch:
+
+jobs:
+  build-and-update:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Initialize and Run
+        run: |
+          if [ ! -f go.mod ]; then go mod init domain-processor; fi
+          go mod tidy
+          go run main.go
+
+      - name: Commit and push changes
+        run: |
+          CURRENT_DATE=$(date +'%d/%m/%Y')
+          
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "Manual trigger - using actor's identity"
+            AUTHOR_NAME="${{ github.actor }}"
+            AUTHOR_EMAIL="${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          else
+            echo "Automatic trigger - using bot identity"
+            AUTHOR_NAME="github-actions[bot]"
+            AUTHOR_EMAIL="github-actions[bot]@users.noreply.github.com"
+          fi
+          
+          git config --local user.name "$AUTHOR_NAME"
+          git config --local user.email "$AUTHOR_EMAIL"
+          
+          git add output/
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update domain lists ($CURRENT_DATE)"
+            git push
+          fi
