@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -35,6 +36,8 @@ func main() {
 	var wg sync.WaitGroup
 	domains := make(map[string]struct{})
 	var mu sync.Mutex
+
+	fmt.Println("Downloading domain names from", len(urls), "sources...")
 
 	for _, url := range urls {
 		wg.Add(1)
@@ -67,23 +70,30 @@ func main() {
 					localCount++
 				}
 			}
-			fmt.Printf("Downloaded %d correct domain names from %s\n", localCount, targetUrl)
+			fmt.Printf("Downloaded and corrected %d domain names from %s\n", localCount, targetUrl)
 		}(url)
 	}
 
 	wg.Wait()
 
-	saveToFile(domains, "output/blacklist.txt")
+	outputPath := "output/blacklist.txt"
+	saveToFile(domains, outputPath)
 }
 
 func saveToFile(domains map[string]struct{}, filename string) {
 	dir := filepath.Dir(filename)
 
-	err := os.MkdirAll(dir, 0755)
-	if err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		fmt.Printf("Failed to create directories: %v\n", err)
 		return
 	}
+
+	fmt.Println("Sorting...")
+	sortedDomains := make([]string, 0, len(domains))
+	for d := range domains {
+		sortedDomains = append(sortedDomains, d)
+	}
+	sort.Strings(sortedDomains)
 
 	file, err := os.Create(filename)
 	if err != nil {
@@ -93,9 +103,10 @@ func saveToFile(domains map[string]struct{}, filename string) {
 	defer file.Close()
 
 	writer := bufio.NewWriter(file)
-	for domain := range domains {
-		_, _ = writer.WriteString(domain + "\n")
+	for _, d := range sortedDomains {
+		_, _ = writer.WriteString(d + "\n")
 	}
 	writer.Flush()
-	fmt.Printf("\nSaved! Total domain names: %d\n", len(domains))
+
+	fmt.Printf("Successfully saved %d domain names to %s\n", len(sortedDomains), filename)
 }
