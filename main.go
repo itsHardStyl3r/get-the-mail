@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -72,13 +73,21 @@ func main() {
 
 	wg.Wait()
 
-	saveToFile(domains, "blacklist.txt")
+	saveToFile(domains, "output/blacklist.txt")
 }
 
 func saveToFile(domains map[string]struct{}, filename string) {
+	dir := filepath.Dir(filename)
+
+	err := os.MkdirAll(dir, 0755)
+	if err != nil {
+		fmt.Printf("Failed to create directories: %v\n", err)
+		return
+	}
+
 	file, err := os.Create(filename)
 	if err != nil {
-		fmt.Printf("Błąd zapisu pliku: %v\n", err)
+		fmt.Printf("Failed to save to file: %v\n", err)
 		return
 	}
 	defer file.Close()
