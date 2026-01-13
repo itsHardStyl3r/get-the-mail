@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 )
+
+var domainRegex = regexp.MustCompile(`^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$`)
 
 func main() {
 	urls := []string{
@@ -34,10 +37,10 @@ func main() {
 
 	for _, url := range urls {
 		wg.Add(1)
-		go func(url string) {
+		go func(targetUrl string) {
 			defer wg.Done()
 
-			resp, err := http.Get(url)
+			resp, err := http.Get(targetUrl)
 			if err != nil {
 				fmt.Printf("Failed to download %s: %v\n", url, err)
 				return
@@ -45,6 +48,8 @@ func main() {
 			defer resp.Body.Close()
 
 			scanner := bufio.NewScanner(resp.Body)
+			localCount := 0
+
 			for scanner.Scan() {
 				line := strings.TrimSpace(scanner.Text())
 
@@ -52,31 +57,36 @@ func main() {
 					continue
 				}
 
-				mu.Lock()
-				domains[strings.ToLower(line)] = struct{}{}
-				mu.Unlock()
+				domain := strings.ToLower(line)
+
+				if domainRegex.MatchString(domain) {
+					mu.Lock()
+					domains[domain] = struct{}{}
+					mu.Unlock()
+					localCount++
+				}
 			}
+			fmt.Printf("Downloaded %d correct domain names from %s\n", localCount, targetUrl)
 		}(url)
 	}
 
 	wg.Wait()
 
-	file, err := os.Create("output/blacklist.txt")
+	saveToFile(domains, "blacklist.txt")
+}
+
+func saveToFile(domains map[string]struct{}, filename string) {
+	file, err := os.Create(filename)
 	if err != nil {
-		panic(err)
+		fmt.Printf("Błąd zapisu pliku: %v\n", err)
+		return
 	}
-	defer func(file *os.File) {
-		err := file.Close()
-		if err != nil {
-			panic(err)
-		}
-	}(file)
+	defer file.Close()
 
 	writer := bufio.NewWriter(file)
 	for domain := range domains {
-		writer.WriteString(domain + "\n")
+		_, _ = writer.WriteString(domain + "\n")
 	}
 	writer.Flush()
-
-	fmt.Printf("Finished! Collected %d unique domains.\n", len(domains))
+	fmt.Printf("\nSaved! Total domain names: %d\n", len(domains))
 }
