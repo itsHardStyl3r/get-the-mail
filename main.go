@@ -15,6 +15,11 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+type OutputConfig struct {
+	BlacklistFile string `yaml:"blacklist_file"`
+	GraylistFile  string `yaml:"graylist_file"`
+}
+
 type Source struct {
 	Name      string `yaml:"name"`
 	RepoURL   string `yaml:"repo_url"`
@@ -24,7 +29,8 @@ type Source struct {
 }
 
 type Config struct {
-	Input []Source `yaml:"input"`
+	Output OutputConfig `yaml:"output"`
+	Input  []Source     `yaml:"input"`
 }
 
 var domainRegex = regexp.MustCompile(`^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])$`)
@@ -93,7 +99,7 @@ func main() {
 	}
 	wg.Wait()
 
-	saveToFile(blacklistDomains, "output/blacklist.txt")
+	saveToFile(blacklistDomains, config.Output.BlacklistFile)
 
 	graylistDomains := make(map[string]struct{})
 	for domain := range blacklistDomains {
@@ -101,7 +107,8 @@ func main() {
 			graylistDomains[domain] = struct{}{}
 		}
 	}
-	saveToFile(graylistDomains, "output/graylist.txt")
+
+	saveToFile(graylistDomains, config.Output.GraylistFile)
 }
 
 func processLine(line string, storage map[string]struct{}, mu *sync.Mutex) bool {
@@ -120,6 +127,9 @@ func processLine(line string, storage map[string]struct{}, mu *sync.Mutex) bool 
 }
 
 func saveToFile(domains map[string]struct{}, filename string) {
+	if filename == "" {
+		return
+	}
 	dir := filepath.Dir(filename)
 	_ = os.MkdirAll(dir, 0755)
 

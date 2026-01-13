@@ -1,3 +1,7 @@
+output:
+  blacklist_file: "output/blacklist.txt"
+  graylist_file: "output/graylist.txt"
+
 input:
   - name: "Disposable Email Domains's list"
     repo_url: "https://github.com/disposable-email-domains/disposable-email-domains"
