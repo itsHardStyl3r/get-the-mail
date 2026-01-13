@@ -1,4 +1,4 @@
-module get-the-mail
+module github.com/itsHardStyl3r/get-the-mail
 
 go 1.25
 
